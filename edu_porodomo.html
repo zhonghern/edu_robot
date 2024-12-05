@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro Timer</title>
+    <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
+    <style>
+        #log {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 200px;
+            overflow-y: scroll;
+            background-color: #f9f9f9;
+        }
+        #log p {
+            margin: 0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pomodoro Timer</h1>
+    <div>
+        <p id="state">State: Stopped</p>
+        <p id="time">Time Remaining: 00:00</p>
+        <p id="remaining-loops">Loops Remaining: 0</p>
+        <button onclick="sendCommand('start')">Start</button>
+        <button onclick="sendCommand('pause')">Pause</button>
+        <button onclick="sendCommand('reset')">Reset</button>
+    </div>
+    <div>
+        <h3>Set Custom Times</h3>
+        <label for="work-time">Work Duration (minutes):</label>
+        <input type="number" id="work-time" value="25" min="1"><br>
+        <label for="break-time">Break Duration (minutes):</label>
+        <input type="number" id="break-time" value="5" min="1"><br>
+        <button onclick="setCustomTime()">Set Times</button>
+    </div>
+    <div>
+        <h3>Set Loops</h3>
+        <label for="loop-count">Number of Loops:</label>
+        <input type="number" id="loop-count" value="1" min="1"><br>
+        <button onclick="setLoops()">Set Loops</button>
+    </div>
+    <div>
+        <h3>Log</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const ros = new ROSLIB.Ros({
+            url: 'ws://localhost:9090'
+        });
+
+        ros.on('connection', () => {
+            console.log('Connected to ROSBridge');
+        });
+
+        ros.on('error', (error) => {
+            console.error('Error connecting to ROSBridge: ', error);
+        });
+
+        ros.on('close', () => {
+            console.log('Disconnected from ROSBridge');
+        });
+
+        // Subscribe to state and time topics
+        const stateListener = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/state',
+            messageType: 'std_msgs/String'
+        });
+
+        const timeListener = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/time',
+            messageType: 'std_msgs/Int32'
+        });
+
+        stateListener.subscribe((message) => {
+            document.getElementById('state').innerText = `State: ${message.data}`;
+        });
+
+        timeListener.subscribe((message) => {
+            const minutes = Math.floor(message.data / 60);
+            const seconds = message.data % 60;
+            document.getElementById('time').innerText = `Time Remaining: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        });
+
+        // Subscribe to loops remaining topic
+        const loopsRemainingListener = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/loops_remaining',
+            messageType: 'std_msgs/Int32'
+        });
+
+        loopsRemainingListener.subscribe((message) => {
+            document.getElementById('remaining-loops').innerText = `Loops Remaining: ${message.data}`;
+        });
+
+        // Subscribe to log topic
+        const logListener = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/log',
+            messageType: 'std_msgs/String'
+        });
+
+        logListener.subscribe((message) => {
+            const logDiv = document.getElementById('log');
+            const logMessage = document.createElement('p');
+            logMessage.textContent = message.data;
+            logDiv.appendChild(logMessage);
+            logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to the latest log
+        });
+
+        // Publish commands to control the timer
+        const controlPublisher = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/control',
+            messageType: 'std_msgs/String'
+        });
+
+        function sendCommand(command) {
+            const message = new ROSLIB.Message({
+                data: command
+            });
+            controlPublisher.publish(message);
+        }
+
+        // Publish custom times
+        const customTimePublisher = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/custom_time',
+            messageType: 'std_msgs/Int32MultiArray'
+        });
+
+        function setCustomTime() {
+            const workTime = parseInt(document.getElementById('work-time').value, 10);
+            const breakTime = parseInt(document.getElementById('break-time').value, 10);
+
+            if (workTime > 0 && breakTime > 0) {
+                const message = new ROSLIB.Message({
+                    data: [workTime, breakTime]
+                });
+                customTimePublisher.publish(message);
+                alert('Custom times updated!');
+            } else {
+                alert('Please enter valid durations.');
+            }
+        }
+
+        // Publish the number of loops
+        const loopPublisher = new ROSLIB.Topic({
+            ros: ros,
+            name: '/pomodoro/loops',
+            messageType: 'std_msgs/Int32'
+        });
+
+        function setLoops() {
+            const loopCount = parseInt(document.getElementById('loop-count').value, 10);
+            if (loopCount > 0) {
+                const message = new ROSLIB.Message({
+                    data: loopCount
+                });
+                loopPublisher.publish(message);
+                alert(`Loop count updated to ${loopCount}`);
+            } else {
+                alert('Please enter a valid number of loops.');
+            }
+        }
+    </script>
+</body>
+</html>
+
+

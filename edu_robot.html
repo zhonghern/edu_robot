@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EDU ROBOT & Pomodoro Timer</title>
+  <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f9;
+    }
+    header {
+      background-color: #5a9;
+      color: white;
+      padding: 10px 20px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+    main {
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .section {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .section h2 {
+      color: #444;
+      border-bottom: 2px solid #ddd;
+      padding-bottom: 5px;
+    }
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 14px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    button:not(:disabled) {
+      background-color: #5a9;
+      color: white;
+    }
+    button:not(:disabled):hover {
+      background-color: #478;
+    }
+    #status, #log {
+      padding: 10px;
+      background-color: #eef;
+      border: 1px solid #99f;
+      border-radius: 5px;
+      margin-bottom: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+    .log-content, #log p {
+      padding: 10px;
+      color: #333;
+      white-space: pre-wrap;
+    }
+    #log {
+      background-color: white;
+    }
+    input {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>EDU ROBOT & Pomodoro Timer</h1>
+  </header>
+
+  <main>
+    <!-- EDU ROBOT Section -->
+    <div id="eduRobot" class="section">
+      <h2>EDU ROBOT</h2>
+      <div id="status" class="section">
+        <h3>Status</h3>
+        <p id="statusMessage">Waiting for user input...</p>
+      </div>
+      <div class="section">
+        <h3>Recording Control</h3>
+        <div class="buttons">
+          <button id="startButton">Start Recording</button>
+          <button id="stopButton" disabled>Stop Recording</button>
+          <button id="stopMusicButton">Stop Music Recording</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Video Playback Control</h3>
+        <div class="buttons">
+          <button id="pauseButton">Pause</button>
+          <button id="resumeButton">Resume</button>
+          <button id="volumeUpButton">Volume Up</button>
+          <button id="volumeDownButton">Volume Down</button>
+          <button id="muteButton">Mute</button>
+          <button id="unmuteButton">Unmute</button>
+        </div>
+      </div>
+      <div id="logs" class="section">
+        <h3>Live Updates</h3>
+        <div id="logContent" class="log-content">No logs yet...</div>
+      </div>
+    </div>
+
+    <!-- Pomodoro Timer Section -->
+    <div id="pomodoroTimer" class="section">
+      <h2>Pomodoro Timer</h2>
+      <div>
+        <p id="state">State: Stopped</p>
+        <p id="time">Time Remaining: 00:00</p>
+        <p id="remaining-loops">Loops Remaining: 0</p>
+        <button onclick="sendCommand('start')">Start</button>
+        <button onclick="sendCommand('pause')">Pause</button>
+        <button onclick="sendCommand('reset')">Reset</button>
+      </div>
+      <div>
+        <h3>Set Custom Times</h3>
+        <label for="work-time">Work Duration (minutes):</label>
+        <input type="number" id="work-time" value="25" min="1"><br>
+        <label for="break-time">Break Duration (minutes):</label>
+        <input type="number" id="break-time" value="5" min="1"><br>
+        <button onclick="setCustomTime()">Set Times</button>
+      </div>
+      <div>
+        <h3>Set Loops</h3>
+        <label for="loop-count">Number of Loops:</label>
+        <input type="number" id="loop-count" value="1" min="1"><br>
+        <button onclick="setLoops()">Set Loops</button>
+      </div>
+      <div id="log" class="section">
+        <h3>Log</h3>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Common ROS connection
+    const ros = new ROSLIB.Ros({
+      url: 'ws://localhost:9090'
+    });
+
+    ros.on('connection', () => {
+      document.getElementById('statusMessage').innerText = "Connected to ROS.";
+      addLog("Connected to ROS.");
+    });
+
+    ros.on('error', (error) => {
+      document.getElementById('statusMessage').innerText = `Error connecting to ROS: ${error}`;
+      addLog(`Error connecting to ROS: ${error}`);
+    });
+
+    ros.on('close', () => {
+      document.getElementById('statusMessage').innerText = "Connection to ROS closed.";
+      addLog("Connection to ROS closed.");
+    });
+
+    function addLog(message) {
+      const logContent = document.getElementById('logContent');
+      const timestamp = new Date().toLocaleTimeString();
+      logContent.innerText += `[${timestamp}] ${message}\n`;
+      logContent.parentElement.scrollTop = logContent.parentElement.scrollHeight;
+    }
+
+    // EDU ROBOT Publishers and Subscribers
+    const recordingStartPublisher = new ROSLIB.Topic({ ros, name: 'recording_start', messageType: 'std_msgs/String' });
+    const recordingStopPublisher = new ROSLIB.Topic({ ros, name: 'recording_stop', messageType: 'std_msgs/String' });
+    const musicStopPublisher = new ROSLIB.Topic({ ros, name: 'music_stop', messageType: 'std_msgs/String' });
+    const videoControlPublisher = new ROSLIB.Topic({ ros, name: 'gesture_detected', messageType: 'std_msgs/String' });
+
+    const ttsOutputSubscriber = new ROSLIB.Topic({ ros, name: 'tts_output', messageType: 'std_msgs/String' });
+    const videoSearchSubscriber = new ROSLIB.Topic({ ros, name: 'video_search', messageType: 'std_msgs/String' });
+    const videoStatusSubscriber = new ROSLIB.Topic({ ros, name: 'video_status', messageType: 'std_msgs/String' });
+    const volumeStatusSubscriber = new ROSLIB.Topic({ ros, name: 'volume_status', messageType: 'std_msgs/String' });
+
+    ttsOutputSubscriber.subscribe((message) => addLog(`TTS Output: ${message.data}`));
+    videoSearchSubscriber.subscribe((message) => addLog(`Video Search Query: ${message.data}`));
+    videoStatusSubscriber.subscribe((message) => addLog(`Video Status: ${message.data}`));
+    volumeStatusSubscriber.subscribe((message) => addLog(`Volume Status: ${message.data}`));
+
+    document.getElementById('startButton').addEventListener('click', () => {
+      recordingStartPublisher.publish(new ROSLIB.Message({ data: 's' }));
+      document.getElementById('startButton').disabled = true;
+      document.getElementById('stopButton').disabled = false;
+      addLog("Recording started.");
+    });
+
+    document.getElementById('stopButton').addEventListener('click', () => {
+      recordingStopPublisher.publish(new ROSLIB.Message({ data: 'd' }));
+      document.getElementById('startButton').disabled = false;
+      document.getElementById('stopButton').disabled = true;
+      addLog("Recording stopped.");
+    });
+
+    document.getElementById('stopMusicButton').addEventListener('click', () => {
+      musicStopPublisher.publish(new ROSLIB.Message({ data: 'd' }));
+      addLog("Music recording stopped.");
+    });
+
+    document.getElementById('pauseButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'pause' }));
+      addLog("Video paused.");
+    });
+
+    document.getElementById('resumeButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'resume' }));
+      addLog("Video resumed.");
+    });
+
+    document.getElementById('volumeUpButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'volume up' }));
+      addLog("Volume increased.");
+    });
+
+    document.getElementById('volumeDownButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'volume down' }));
+      addLog("Volume decreased.");
+    });
+
+    document.getElementById('muteButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'mute' }));
+      addLog("Video muted.");
+    });
+
+    document.getElementById('unmuteButton').addEventListener('click', () => {
+      videoControlPublisher.publish(new ROSLIB.Message({ data: 'unmute' }));
+      addLog("Video unmuted.");
+    });
+
+    // Pomodoro Timer Publishers and Subscribers
+    const stateListener = new ROSLIB.Topic({ ros, name: '/pomodoro/state', messageType: 'std_msgs/String' });
+    const timeListener = new ROSLIB.Topic({ ros, name: '/pomodoro/time', messageType: 'std_msgs/Int32' });
+    const loopsRemainingListener = new ROSLIB.Topic({ ros, name: '/pomodoro/loops_remaining', messageType: 'std_msgs/Int32' });
+    const logListener = new ROSLIB.Topic({ ros, name: '/pomodoro/log', messageType: 'std_msgs/String' });
+    const controlPublisher = new ROSLIB.Topic({ ros, name: '/pomodoro/control', messageType: 'std_msgs/String' });
+    const customTimePublisher = new ROSLIB.Topic({ ros, name: '/pomodoro/custom_time', messageType: 'std_msgs/Int32MultiArray' });
+    const loopPublisher = new ROSLIB.Topic({ ros, name: '/pomodoro/loops', messageType: 'std_msgs/Int32' });
+
+    stateListener.subscribe((message) => {
+      document.getElementById('state').innerText = `State: ${message.data}`;
+    });
+
+    timeListener.subscribe((message) => {
+      const minutes = Math.floor(message.data / 60);
+      const seconds = message.data % 60;
+      document.getElementById('time').innerText = `Time Remaining: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    });
+
+    loopsRemainingListener.subscribe((message) => {
+      document.getElementById('remaining-loops').innerText = `Loops Remaining: ${message.data}`;
+    });
+
+    logListener.subscribe((message) => {
+      const logDiv = document.getElementById('log');
+      const logMessage = document.createElement('p');
+      logMessage.textContent = message.data;
+      logDiv.appendChild(logMessage);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    });
+
+    function sendCommand(command) {
+      const message = new ROSLIB.Message({ data: command });
+      controlPublisher.publish(message);
+    }
+
+    function setCustomTime() {
+      const workTime = parseInt(document.getElementById('work-time').value, 10);
+      const breakTime = parseInt(document.getElementById('break-time').value, 10);
+
+      if (workTime > 0 && breakTime > 0) {
+        const message = new ROSLIB.Message({ data: [workTime, breakTime] });
+        customTimePublisher.publish(message);
+        alert('Custom times updated!');
+      } else {
+        alert('Please enter valid durations.');
+      }
+    }
+
+    function setLoops() {
+      const loopCount = parseInt(document.getElementById('loop-count').value, 10);
+      if (loopCount > 0) {
+        const message = new ROSLIB.Message({ data: loopCount });
+        loopPublisher.publish(message);
+        alert(`Loop count updated to ${loopCount}`);
+      } else {
+        alert('Please enter a valid number of loops.');
+      }
+    }
+  </script>
+</body>
+</html>
+
